@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"code.dogecoin.org/dkm/internal"
+	"code.dogecoin.org/dkm/internal/enclave"
 	"github.com/dogeorg/doge"
 	"github.com/dogeorg/doge/bip39"
 	"golang.org/x/crypto/argon2"
@@ -60,18 +61,77 @@ func New(store internal.StoreCtx) internal.KeyMgr {
 }
 
 func (km *keyMgr) CreateKey(pass string) (mnemonic []string, err error) {
-	mnemonic, key, pub, err := km.generateMnemonic()
+	// Try to use OP-TEE enclave for mnemonic generation if available
+	opteeTool, err := enclave.NewOpteeTool("")
+	if err != nil {
+		// Enclave not available, fall back to local generation
+		log.Printf("OP-TEE enclave not available, using local mnemonic generation: %v", err)
+		mnemonic, key, pub, err := km.generateMnemonic()
+		if err != nil {
+			return nil, err
+		}
+		err = km.encryptAndSetKey(MainKey, key, pub, pass, false)
+		memZero(key)
+		if err != nil {
+			if internal.IsAlreadyExistsError(err) {
+				return nil, ErrKeyExists
+			}
+			return nil, err
+		}
+		return mnemonic, nil
+	}
+
+	// Check if a mnemonic already exists in the enclave
+	if opteeTool.HasMnemonic() {
+		return nil, ErrKeyExists
+	}
+
+	// Generate mnemonic in the secure enclave
+	mnemonic, err = opteeTool.GenerateMnemonic()
+	if err != nil {
+		// Fall back to local generation if enclave fails
+		log.Printf("Failed to generate mnemonic in enclave, using local generation: %v", err)
+		mnemonic, key, pub, err := km.generateMnemonic()
+		if err != nil {
+			return nil, err
+		}
+		err = km.encryptAndSetKey(MainKey, key, pub, pass, false)
+		memZero(key)
+		if err != nil {
+			if internal.IsAlreadyExistsError(err) {
+				return nil, ErrKeyExists
+			}
+			return nil, err
+		}
+		return mnemonic, nil
+	}
+
+	// Derive the master key from the mnemonic generated in the enclave
+	seed, err := bip39.SeedFromMnemonic(mnemonic, "", bip39.EnglishWordList)
 	if err != nil {
 		return nil, err
 	}
-	err = km.encryptAndSetKey(MainKey, key, pub, pass, false)
-	memZero(key)
+	defer memZero(seed)
+
+	master, err := doge.Bip32MasterFromSeed(seed, &doge.DogeMainNetChain)
+	if err != nil {
+		return nil, err
+	}
+	defer master.Clear()
+
+	pub := master.GetECPubKey()
+	key := []byte(master.EncodeWIF())
+	defer memZero(key)
+
+	err = km.encryptAndSetKey(MainKey, key, pub[:], pass, false)
 	if err != nil {
 		if internal.IsAlreadyExistsError(err) {
 			return nil, ErrKeyExists
 		}
 		return nil, err
 	}
+
+	log.Printf("Mnemonic successfully generated and stored in OP-TEE secure enclave")
 	return mnemonic, nil
 }
 
