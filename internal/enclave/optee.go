@@ -41,8 +41,9 @@ func NewOpteeTool(binPath string) (*OpteeTool, error) {
 // GenerateMnemonic generates a new mnemonic in the enclave
 // Uses the -c generate_mnemonic command
 // The -p flag provides the password for the mnemonic seedphrase
+// The -f flag with "delegate" enables delegation features
 func (t *OpteeTool) GenerateMnemonic(password string) ([]string, error) {
-	cmd := exec.Command(t.binPath, "-c", "generate_mnemonic", "-p", password)
+	cmd := exec.Command(t.binPath, "-c", "generate_mnemonic", "-p", password, "-f", "delegate")
 	
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

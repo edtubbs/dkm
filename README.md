@@ -38,7 +38,7 @@ Trusted Application. The tool handles all communication with the secure enclave:
 
 ```bash
 # Generate mnemonic in enclave (called by DKM with user password)
-optee_libdogecoin -c generate_mnemonic -p <password>
+optee_libdogecoin -c generate_mnemonic -p <password> -f "delegate"
 
 # Generate extended public key from master key path (for verification)
 optee_libdogecoin -c generate_extended_public_key -h m -p <password>

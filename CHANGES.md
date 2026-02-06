@@ -39,8 +39,8 @@ HasMnemonic(password string) bool
 ## CLI Commands Generated
 
 ```bash
-# Generate mnemonic
-optee_libdogecoin -c generate_mnemonic -p <password>
+# Generate mnemonic with delegate flag
+optee_libdogecoin -c generate_mnemonic -p <password> -f "delegate"
 
 # Verify master key exists
 optee_libdogecoin -c generate_extended_public_key -h m -p <password>

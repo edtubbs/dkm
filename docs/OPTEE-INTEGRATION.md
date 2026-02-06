@@ -47,12 +47,13 @@ The `optee_libdogecoin` tool provides these commands:
 
 ### Generate Mnemonic
 ```bash
-optee_libdogecoin -c generate_mnemonic -p <password>
+optee_libdogecoin -c generate_mnemonic -p <password> -f "delegate"
 ```
 - Generates a new BIP39 mnemonic in the secure enclave
 - Stores it in secure storage
 - Returns the mnemonic (one-time only, for user backup)
 - `-p` flag provides the password for the mnemonic seedphrase
+- `-f "delegate"` flag enables delegation features for the mnemonic
 - `-z` flag can be added to enable YubiKey authentication (not used by DKM)
 
 ### Generate Extended Public Key
