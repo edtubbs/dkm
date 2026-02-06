@@ -37,14 +37,15 @@ DKM calls the `optee_libdogecoin` command-line tool to interact with the OP-TEE
 Trusted Application. The tool handles all communication with the secure enclave:
 
 ```bash
-# Generate mnemonic in enclave (called by DKM)
-optee_libdogecoin -c generate_mnemonic -z
+# Generate mnemonic in enclave (called by DKM with user password)
+optee_libdogecoin -c generate_mnemonic -p <password>
 
 # Generate address from enclave-stored mnemonic
-optee_libdogecoin -c generate_address -z -o 0 -l 0 -i 0
+optee_libdogecoin -c generate_address -o 0 -l 0 -i 0 -p <password>
 ```
 
-The `-z` flag skips YubiKey/TOTP authentication for simpler integration.
+The `-p` flag passes the user's password to protect the mnemonic. 
+The `-z` flag can optionally enable YubiKey authentication (not used by DKM).
 
 ### Building with OP-TEE Support
 

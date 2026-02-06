@@ -13,21 +13,22 @@ The previous CGO-based approach was **incorrect**. The actual usage pattern (as 
 ### Call External CLI Tool
 
 ```go
-cmd := exec.Command("optee_libdogecoin", "-c", "generate_mnemonic", "-z")
+cmd := exec.Command("optee_libdogecoin", "-c", "generate_mnemonic", "-p", password)
 ```
 
-Instead of CGO bindings to libteec, we simply invoke the existing CLI tool.
+Instead of CGO bindings to libteec, we simply invoke the existing CLI tool with the user's password.
 
 ## Implementation
 
 ### 1. Enclave Package (`internal/enclave/optee.go`)
 
 - `OpteeTool` struct wraps the CLI tool
-- `GenerateMnemonic()` - calls `optee_libdogecoin -c generate_mnemonic -z`
-- `GenerateAddress()` - calls `optee_libdogecoin -c generate_address -z -o X -l Y -i Z`
-- `HasMnemonic()` - checks if mnemonic exists by attempting address generation
+- `GenerateMnemonic(password)` - calls `optee_libdogecoin -c generate_mnemonic -p <password>`
+- `GenerateAddress(..., password)` - calls `optee_libdogecoin -c generate_address -o X -l Y -i Z -p <password>`
+- `HasMnemonic(password)` - checks if mnemonic exists by attempting address generation
 - Parses stdout using regex to extract results
 - No CGO, no C headers, no complex build dependencies
+- Uses `-p` flag to pass password (not `-z` which enables YubiKey)
 
 ### 2. Key Manager Integration
 

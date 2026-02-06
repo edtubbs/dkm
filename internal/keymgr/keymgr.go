@@ -82,12 +82,12 @@ func (km *keyMgr) CreateKey(pass string) (mnemonic []string, err error) {
 	}
 
 	// Check if a mnemonic already exists in the enclave
-	if opteeTool.HasMnemonic() {
+	if opteeTool.HasMnemonic(pass) {
 		return nil, ErrKeyExists
 	}
 
-	// Generate mnemonic in the secure enclave
-	mnemonic, err = opteeTool.GenerateMnemonic()
+	// Generate mnemonic in the secure enclave with password
+	mnemonic, err = opteeTool.GenerateMnemonic(pass)
 	if err != nil {
 		// Fall back to local generation if enclave fails
 		log.Printf("Failed to generate mnemonic in enclave, using local generation: %v", err)
@@ -131,7 +131,7 @@ func (km *keyMgr) CreateKey(pass string) (mnemonic []string, err error) {
 		return nil, err
 	}
 
-	log.Printf("Mnemonic successfully generated and stored in OP-TEE secure enclave")
+	log.Printf("Mnemonic successfully generated and stored in OP-TEE secure enclave with password")
 	return mnemonic, nil
 }
 

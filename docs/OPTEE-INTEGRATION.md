@@ -47,20 +47,22 @@ The `optee_libdogecoin` tool provides these commands:
 
 ### Generate Mnemonic
 ```bash
-optee_libdogecoin -c generate_mnemonic -z
+optee_libdogecoin -c generate_mnemonic -p <password>
 ```
 - Generates a new BIP39 mnemonic in the secure enclave
 - Stores it in secure storage
 - Returns the mnemonic (one-time only, for user backup)
-- `-z` flag skips YubiKey/TOTP authentication
+- `-p` flag provides the password for the mnemonic seedphrase
+- `-z` flag can be added to enable YubiKey authentication (not used by DKM)
 
 ### Generate Address
 ```bash
-optee_libdogecoin -c generate_address -z -o 0 -l 0 -i 0
+optee_libdogecoin -c generate_address -o 0 -l 0 -i 0 -p <password>
 ```
 - Generates a Dogecoin address from the stored mnemonic
 - Uses BIP44 derivation path: m/44'/3'/account'/change/index
 - `-o` = account, `-l` = change level, `-i` = address index
+- `-p` = password for authentication
 - Returns the address (e.g., "D...")
 
 ## Implementation Details
@@ -75,9 +77,9 @@ type OpteeTool struct {
 }
 
 func NewOpteeTool(binPath string) (*OpteeTool, error)
-func (t *OpteeTool) GenerateMnemonic() ([]string, error)
-func (t *OpteeTool) GenerateAddress(account, changeLevel, addressIndex int) (string, error)
-func (t *OpteeTool) HasMnemonic() bool
+func (t *OpteeTool) GenerateMnemonic(password string) ([]string, error)
+func (t *OpteeTool) GenerateAddress(account, changeLevel, addressIndex int, password string) (string, error)
+func (t *OpteeTool) HasMnemonic(password string) bool
 ```
 
 Key features:
@@ -85,6 +87,7 @@ Key features:
 - Parses stdout using regex to extract results
 - Returns structured errors on failure
 - Checks if tool is available using `exec.LookPath`
+- Passes password via `-p` flag (not `-z` for YubiKey)
 
 ### Key Manager Integration
 
@@ -92,9 +95,9 @@ The `CreateKey()` method attempts to use the enclave:
 
 1. Try to initialize `OpteeTool`
    - If fails → Use local mnemonic generation
-2. Check if mnemonic already exists in enclave
+2. Check if mnemonic already exists in enclave (using password)
    - If yes → Return ErrKeyExists
-3. Generate mnemonic in enclave
+3. Generate mnemonic in enclave with password
    - If fails → Use local mnemonic generation
 4. Derive master key from mnemonic
 5. Encrypt and store master key locally

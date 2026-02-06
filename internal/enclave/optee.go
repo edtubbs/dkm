@@ -40,9 +40,9 @@ func NewOpteeTool(binPath string) (*OpteeTool, error) {
 
 // GenerateMnemonic generates a new mnemonic in the enclave
 // Uses the -c generate_mnemonic command
-// The -z flag skips YubiKey/TOTP authentication
-func (t *OpteeTool) GenerateMnemonic() ([]string, error) {
-	cmd := exec.Command(t.binPath, "-c", "generate_mnemonic", "-z")
+// The -p flag provides the password for the mnemonic seedphrase
+func (t *OpteeTool) GenerateMnemonic(password string) ([]string, error) {
+	cmd := exec.Command(t.binPath, "-c", "generate_mnemonic", "-p", password)
 	
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -67,13 +67,14 @@ func (t *OpteeTool) GenerateMnemonic() ([]string, error) {
 // GenerateAddress generates a Dogecoin address from the enclave
 // account, changeLevel, and addressIndex specify the BIP44 derivation path
 // Uses: m/44'/3'/account'/changeLevel/addressIndex
-func (t *OpteeTool) GenerateAddress(account, changeLevel, addressIndex int) (string, error) {
+// The -p flag provides the password for authentication
+func (t *OpteeTool) GenerateAddress(account, changeLevel, addressIndex int, password string) (string, error) {
 	cmd := exec.Command(t.binPath, 
 		"-c", "generate_address",
-		"-z", // skip TOTP
 		"-o", fmt.Sprintf("%d", account),
 		"-l", fmt.Sprintf("%d", changeLevel),
-		"-i", fmt.Sprintf("%d", addressIndex))
+		"-i", fmt.Sprintf("%d", addressIndex),
+		"-p", password)
 	
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -97,8 +98,9 @@ func (t *OpteeTool) GenerateAddress(account, changeLevel, addressIndex int) (str
 
 // HasMnemonic checks if a mnemonic is stored in the enclave
 // This attempts to generate an address; if successful, mnemonic exists
-func (t *OpteeTool) HasMnemonic() bool {
-	_, err := t.GenerateAddress(0, 0, 0)
+// A dummy password is used since we're just checking for existence
+func (t *OpteeTool) HasMnemonic(password string) bool {
+	_, err := t.GenerateAddress(0, 0, 0, password)
 	return err == nil
 }
 
