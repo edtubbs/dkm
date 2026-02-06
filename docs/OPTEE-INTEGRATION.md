@@ -55,13 +55,26 @@ optee_libdogecoin -c generate_mnemonic -p <password>
 - `-p` flag provides the password for the mnemonic seedphrase
 - `-z` flag can be added to enable YubiKey authentication (not used by DKM)
 
+### Generate Extended Public Key
+```bash
+optee_libdogecoin -c generate_extended_public_key -h <custom_path> -p <password>
+```
+- Generates an extended public key from the stored mnemonic
+- `-h` flag specifies a custom BIP32 derivation path (e.g., `m`, `m/1000'/2'`)
+- DKM uses path `m` to verify the master key
+- DKM uses path `m/1000'/2'` for delegate/pup namespace
+- Returns the extended public key
+
 ### Generate Address
 ```bash
 optee_libdogecoin -c generate_address -o 0 -l 0 -i 0 -p <password>
+# OR with custom path
+optee_libdogecoin -c generate_address -h <custom_path> -p <password>
 ```
 - Generates a Dogecoin address from the stored mnemonic
 - Uses BIP44 derivation path: m/44'/3'/account'/change/index
 - `-o` = account, `-l` = change level, `-i` = address index
+- `-h` = custom path (alternative to -o/-l/-i)
 - `-p` = password for authentication
 - Returns the address (e.g., "D...")
 
@@ -78,7 +91,8 @@ type OpteeTool struct {
 
 func NewOpteeTool(binPath string) (*OpteeTool, error)
 func (t *OpteeTool) GenerateMnemonic(password string) ([]string, error)
-func (t *OpteeTool) GenerateAddress(account, changeLevel, addressIndex int, password string) (string, error)
+func (t *OpteeTool) GenerateExtendedPublicKey(account, changeLevel int, password string, customPath string) (string, error)
+func (t *OpteeTool) GenerateAddress(account, changeLevel, addressIndex int, password string, customPath string) (string, error)
 func (t *OpteeTool) HasMnemonic(password string) bool
 ```
 
@@ -88,6 +102,18 @@ Key features:
 - Returns structured errors on failure
 - Checks if tool is available using `exec.LookPath`
 - Passes password via `-p` flag (not `-z` for YubiKey)
+- **Supports custom key paths via `-h` flag** to align with DKM's BIP32 derivation
+
+### DKM Key Derivation Alignment
+
+DKM uses specific BIP32 paths:
+- **Master key**: `m` (derived directly from mnemonic)
+- **Pup/Delegate namespace**: `m/1000'/2'/N'` (where N is delegate index)
+
+The enclave integration now uses the `-h` custom path flag to ensure alignment:
+- `HasMnemonic()` uses path `m` to verify master key existence
+- Future delegate operations can use `m/1000'/2'/N'` paths
+- Standard operations can still use BIP44 paths via `-o`, `-l`, `-i` flags
 
 ### Key Manager Integration
 

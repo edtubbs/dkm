@@ -64,17 +64,71 @@ func (t *OpteeTool) GenerateMnemonic(password string) ([]string, error) {
 	return mnemonic, nil
 }
 
+// GenerateExtendedPublicKey generates an extended public key from the enclave
+// If customPath is provided, it will be used instead via -h flag
+// Otherwise uses BIP44 path: m/44'/3'/account'/changeLevel
+// The -p flag provides the password for authentication
+func (t *OpteeTool) GenerateExtendedPublicKey(account, changeLevel int, password string, customPath string) (string, error) {
+	var cmd *exec.Cmd
+	
+	if customPath != "" {
+		// Use custom path via -h flag
+		cmd = exec.Command(t.binPath, 
+			"-c", "generate_extended_public_key",
+			"-h", customPath,
+			"-p", password)
+	} else {
+		// Use BIP44 parameters
+		cmd = exec.Command(t.binPath, 
+			"-c", "generate_extended_public_key",
+			"-o", fmt.Sprintf("%d", account),
+			"-l", fmt.Sprintf("%d", changeLevel),
+			"-p", password)
+	}
+	
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	
+	err := cmd.Run()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate extended public key: %v, stderr: %s", err, stderr.String())
+	}
+	
+	// Parse the output to extract the extended public key
+	// Expected format: "Extended public key generated: xpub..."
+	output := stdout.String()
+	xpub, err := extractExtendedPublicKeyFromOutput(output)
+	if err != nil {
+		return "", err
+	}
+	
+	return xpub, nil
+}
+
 // GenerateAddress generates a Dogecoin address from the enclave
 // account, changeLevel, and addressIndex specify the BIP44 derivation path
 // Uses: m/44'/3'/account'/changeLevel/addressIndex
+// If customPath is provided, it will be used instead via -h flag
 // The -p flag provides the password for authentication
-func (t *OpteeTool) GenerateAddress(account, changeLevel, addressIndex int, password string) (string, error) {
-	cmd := exec.Command(t.binPath, 
-		"-c", "generate_address",
-		"-o", fmt.Sprintf("%d", account),
-		"-l", fmt.Sprintf("%d", changeLevel),
-		"-i", fmt.Sprintf("%d", addressIndex),
-		"-p", password)
+func (t *OpteeTool) GenerateAddress(account, changeLevel, addressIndex int, password string, customPath string) (string, error) {
+	var cmd *exec.Cmd
+	
+	if customPath != "" {
+		// Use custom path via -h flag
+		cmd = exec.Command(t.binPath, 
+			"-c", "generate_address",
+			"-h", customPath,
+			"-p", password)
+	} else {
+		// Use BIP44 parameters
+		cmd = exec.Command(t.binPath, 
+			"-c", "generate_address",
+			"-o", fmt.Sprintf("%d", account),
+			"-l", fmt.Sprintf("%d", changeLevel),
+			"-i", fmt.Sprintf("%d", addressIndex),
+			"-p", password)
+	}
 	
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -97,11 +151,27 @@ func (t *OpteeTool) GenerateAddress(account, changeLevel, addressIndex int, pass
 }
 
 // HasMnemonic checks if a mnemonic is stored in the enclave
-// This attempts to generate an address; if successful, mnemonic exists
-// A dummy password is used since we're just checking for existence
+// This attempts to generate the extended public key from the master key path "m"
+// to verify that the enclave has a mnemonic that matches DKM's expected derivation
 func (t *OpteeTool) HasMnemonic(password string) bool {
-	_, err := t.GenerateAddress(0, 0, 0, password)
+	// Use master key path "m" to check for mnemonic existence
+	// This aligns with how DKM derives the master key
+	_, err := t.GenerateExtendedPublicKey(0, 0, password, "m")
 	return err == nil
+}
+
+// extractExtendedPublicKeyFromOutput parses the extended public key from optee_libdogecoin output
+func extractExtendedPublicKeyFromOutput(output string) (string, error) {
+	// Look for "Extended public key generated:" or similar pattern
+	re := regexp.MustCompile(`(?i)extended\s+public\s+key\s+(?:generated)?:?\s*(\S+)`)
+	matches := re.FindStringSubmatch(output)
+	
+	if len(matches) < 2 {
+		return "", fmt.Errorf("%w: no extended public key found in output", ErrInvalidEnclaveOutput)
+	}
+	
+	xpub := strings.TrimSpace(matches[1])
+	return xpub, nil
 }
 
 // extractMnemonicFromOutput parses the mnemonic from optee_libdogecoin output

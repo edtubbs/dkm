@@ -40,11 +40,19 @@ Trusted Application. The tool handles all communication with the secure enclave:
 # Generate mnemonic in enclave (called by DKM with user password)
 optee_libdogecoin -c generate_mnemonic -p <password>
 
+# Generate extended public key from master key path (for verification)
+optee_libdogecoin -c generate_extended_public_key -h m -p <password>
+
 # Generate address from enclave-stored mnemonic
 optee_libdogecoin -c generate_address -o 0 -l 0 -i 0 -p <password>
 ```
 
 The `-p` flag passes the user's password to protect the mnemonic. 
+The `-h` flag specifies a custom BIP32 key path, allowing DKM to use its 
+specific derivation paths:
+- `m` for master key verification
+- `m/1000'/2'/N'` for pup/delegate namespace
+
 The `-z` flag can optionally enable YubiKey authentication (not used by DKM).
 
 ### Building with OP-TEE Support
