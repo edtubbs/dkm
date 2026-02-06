@@ -78,6 +78,25 @@ optee_libdogecoin -c generate_address -h <custom_path> -p <password>
 - `-p` = password for authentication
 - Returns the address (e.g., "D...")
 
+### Delegate Key
+```bash
+optee_libdogecoin -c delegate_key -o <account> -d <delegate_password> -h <custom_path> -p <password>
+```
+- Delegates account keys in the enclave with delegate password protection
+- `-o` = account number
+- `-d` = delegate password for the delegated keys
+- `-h` = custom path (e.g., `"m/1000'/2'/0'"` for DKM delegate namespace)
+- `-p` = main password for authentication
+
+### Export Delegate Key
+```bash
+optee_libdogecoin -c export_delegate_key -o <account> -d <delegate_password>
+```
+- Exports delegated account keys using the delegate password
+- `-o` = account number
+- `-d` = delegate password
+- Returns the exported key data
+
 ## Implementation Details
 
 ### Enclave Package (`internal/enclave/optee.go`)
@@ -93,6 +112,8 @@ func NewOpteeTool(binPath string) (*OpteeTool, error)
 func (t *OpteeTool) GenerateMnemonic(password string) ([]string, error)
 func (t *OpteeTool) GenerateExtendedPublicKey(account, changeLevel int, password string, customPath string) (string, error)
 func (t *OpteeTool) GenerateAddress(account, changeLevel, addressIndex int, password string, customPath string) (string, error)
+func (t *OpteeTool) DelegateKey(account int, delegatePassword, password, customPath string) error
+func (t *OpteeTool) ExportDelegateKey(account int, delegatePassword string) (string, error)
 func (t *OpteeTool) HasMnemonic(password string) bool
 ```
 
@@ -112,8 +133,15 @@ DKM uses specific BIP32 paths:
 
 The enclave integration now uses the `-h` custom path flag to ensure alignment:
 - `HasMnemonic()` uses path `m` to verify master key existence
-- Future delegate operations can use `m/1000'/2'/N'` paths
+- `DelegateKey()` can use path `m/1000'/2'/N'` for delegate operations
 - Standard operations can still use BIP44 paths via `-o`, `-l`, `-i` flags
+
+### Delegate Key Operations
+
+DKM's delegate key operations can leverage the enclave:
+- `CreateDelegate()` creates keys at `m/1000'/2'/N'` - can use `DelegateKey()` with custom path
+- Delegate keys are protected by both the main password and a delegate-specific password
+- Export operations use the delegate password for access control
 
 ### Key Manager Integration
 

@@ -160,6 +160,62 @@ func (t *OpteeTool) HasMnemonic(password string) bool {
 	return err == nil
 }
 
+// DelegateKey delegates account keys in the enclave
+// Uses custom path for DKM's delegate namespace: m/1000'/2'/N'
+// The -d flag provides the delegate password
+func (t *OpteeTool) DelegateKey(account int, delegatePassword, password, customPath string) error {
+	var cmd *exec.Cmd
+	
+	if customPath != "" {
+		// Use custom path via -h flag (e.g., "m/1000'/2'/0'")
+		cmd = exec.Command(t.binPath,
+			"-c", "delegate_key",
+			"-o", fmt.Sprintf("%d", account),
+			"-d", delegatePassword,
+			"-h", customPath,
+			"-p", password)
+	} else {
+		// Use account number only
+		cmd = exec.Command(t.binPath,
+			"-c", "delegate_key",
+			"-o", fmt.Sprintf("%d", account),
+			"-d", delegatePassword,
+			"-p", password)
+	}
+	
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to delegate key: %v, stderr: %s", err, stderr.String())
+	}
+	
+	return nil
+}
+
+// ExportDelegateKey exports delegated account keys from the enclave
+// Uses the delegate password to export keys
+func (t *OpteeTool) ExportDelegateKey(account int, delegatePassword string) (string, error) {
+	cmd := exec.Command(t.binPath,
+		"-c", "export_delegate_key",
+		"-o", fmt.Sprintf("%d", account),
+		"-d", delegatePassword)
+	
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	
+	err := cmd.Run()
+	if err != nil {
+		return "", fmt.Errorf("failed to export delegate key: %v, stderr: %s", err, stderr.String())
+	}
+	
+	// Return the full output as it contains the exported key
+	return stdout.String(), nil
+}
+
 // extractExtendedPublicKeyFromOutput parses the extended public key from optee_libdogecoin output
 func extractExtendedPublicKeyFromOutput(output string) (string, error) {
 	// Look for "Extended public key generated:" or similar pattern
