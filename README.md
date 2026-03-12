@@ -94,3 +94,12 @@ DKM gracefully handles the absence of OP-TEE:
 The master key derived from the mnemonic is still encrypted and stored locally
 in both cases, ensuring compatibility across all deployments.
 
+## Deployment
+
+For production deployment on Dogebox OS with OP-TEE support, the tee-supplicant 
+service must be configured. Add the configuration to the `Dogebox-WG/os` 
+repository in the `nix/dbx/dkm.nix` module.
+
+See [docs/OPTEE-INTEGRATION.md](docs/OPTEE-INTEGRATION.md) for the complete 
+NixOS module configuration, including all required trusted applications.
+
