@@ -279,24 +279,24 @@ This ensures DKM works whether OP-TEE is present or not.
 
 ## NixOS Deployment Configuration
 
-### Architecture
+### Architecture Overview
 
-DKM provides the OP-TEE enclave integration code, but **does not configure the tee-supplicant service itself**. Instead:
+DKM is a **system-level service** that needs tee-supplicant running at the system level to use OP-TEE. Pups are containerized applications that may also need their own tee-supplicant inside their containers.
 
-- **Individual pups** that need OP-TEE configure tee-supplicant in their `pup.nix` files
-- **DKM** provides the Go wrapper code that pups can use to interact with the enclave
-- This prevents conflicts and allows each pup to specify its own TA requirements
+**No conflict exists because:**
+- System-level tee-supplicant serves DKM (host service)
+- Container-level tee-supplicant serves pups (isolated containers)
 
-### Example: Pup Configuration
+### System-Level Configuration (For DKM)
 
-Pups that use DKM's OP-TEE integration configure tee-supplicant like this (from `spv-enclave/pup.nix`):
+Add to **`Dogebox-WG/os`** repository in file **`nix/dbx/dkm.nix`**:
 
 ```nix
+{ config, pkgs, lib, ... }:
 {
-  pupEnclave = true;
-
-  imports = [ (pkgs.nixosModules.tee-supplicant) ];
-
+  # ... existing DKM service configuration ...
+  
+  # Enable tee-supplicant for DKM's OP-TEE integration
   services.tee-supplicant = {
     enable = true;
     trustedApplications = [
@@ -313,23 +313,48 @@ Pups that use DKM's OP-TEE integration configure tee-supplicant like this (from 
 }
 ```
 
-### Where to Configure
+**Why:** DKM runs as a system service and directly calls `optee_libdogecoin`, which requires tee-supplicant at the system level.
 
-**Do NOT add to:** `Dogebox-WG/os` repository's `nix/dbx/dkm.nix`
+### Pup-Level Configuration (For Containerized Apps)
 
-**DO add to:** Each pup's `pup.nix` file that needs OP-TEE support
+Individual pups also configure tee-supplicant in their `pup.nix` files if they need OP-TEE within their containers.
 
-### Why Per-Pup Configuration
+**Example from `spv-enclave/pup.nix`:**
 
-1. **No conflicts**: Each pup manages its own tee-supplicant instance
-2. **Flexibility**: Pups can specify different TAs as needed
-3. **Isolation**: Follows containerized architecture of Dogebox
-4. **Standard pattern**: Already used in spv-enclave and other pups
+```nix
+{
+  pupEnclave = true;
+  imports = [ (pkgs.nixosModules.tee-supplicant) ];
+  
+  services.tee-supplicant = {
+    enable = true;
+    trustedApplications = [
+      # Same TAs as system level
+      "${pkgs.optee-os-rockchip-rk3588.devkit}/ta/023f8f1a-292a-432b-8fc4-de8471358067.ta"
+      "${pkgs.optee-os-rockchip-rk3588.devkit}/ta/80a4c275-0a47-4905-8285-1486a9771a08.ta"
+      "${pkgs.optee-os-rockchip-rk3588.devkit}/ta/f04a0fe7-1f5d-4b9b-abf7-619b85b4ce8c.ta"
+      "${pkgs.optee-os-rockchip-rk3588.devkit}/ta/fd02c9da-306c-48c7-a49c-bbd827ae86ee.ta"
+      "${libdogecoin."libdogecoin-optee-ta"}/ta/62d95dc0-7fc2-4cb3-a7f3-c13ae4e633c4.ta"
+    ];
+  };
+}
+```
+
+**Why:** Pups run in isolated systemd-nspawn containers and need their own tee-supplicant instance to communicate with OP-TEE.
+
+### Configuration Summary
+
+| Component | Level | Configure In | Purpose |
+|-----------|-------|--------------|---------|
+| DKM | System | `Dogebox-WG/os` → `nix/dbx/dkm.nix` | DKM service uses OP-TEE |
+| Pups | Container | Each pup's `pup.nix` | Pup uses OP-TEE in container |
+
+Both can coexist without conflict because they operate at different isolation levels.
 
 ### Trusted Applications
 
 - **Standard OP-TEE TAs**: Platform-specific TAs from optee-os-rockchip-rk3588
-- **libdogecoin TA** (UUID: 62d95dc0-7fc2-4cb3-a7f3-c13ae4e633c4): The secure enclave for DKM operations
+- **libdogecoin TA** (UUID: 62d95dc0-7fc2-4cb3-a7f3-c13ae4e633c4): The secure enclave for DKM/pup operations
 
 ### Platform Support
 

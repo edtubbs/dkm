@@ -96,11 +96,19 @@ in both cases, ensuring compatibility across all deployments.
 
 ## Deployment
 
-DKM provides OP-TEE enclave integration code that pups can use. Individual pups 
-that need OP-TEE support configure the tee-supplicant service in their own 
-`pup.nix` files, not in the DKM service module. This prevents conflicts and 
-follows Dogebox's containerized architecture.
+### System-Level Configuration (Required for DKM)
 
-See [docs/OPTEE-INTEGRATION.md](docs/OPTEE-INTEGRATION.md) for details on how 
-pups configure tee-supplicant and the complete list of required trusted applications.
+DKM is a system service that needs tee-supplicant running at the system level. 
+Add the tee-supplicant configuration in `Dogebox-WG/os` repository at 
+`nix/dbx/dkm.nix`.
+
+### Pup-Level Configuration (For Containerized Apps)
+
+Pups that use OP-TEE also configure tee-supplicant in their own `pup.nix` files 
+(e.g., spv-enclave). Both system and pup levels can run tee-supplicant without 
+conflict because pups are isolated in systemd-nspawn containers.
+
+See [docs/OPTEE-INTEGRATION.md](docs/OPTEE-INTEGRATION.md) for complete 
+configuration details, including all required trusted applications for both 
+system and pup deployments.
 
