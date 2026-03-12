@@ -277,8 +277,59 @@ This ensures DKM works whether OP-TEE is present or not.
 - No CGO, no C headers needed
 - Matches actual libdogecoin usage pattern
 
+## NixOS Deployment Configuration
+
+For DKM to use OP-TEE in production on Dogebox OS, the tee-supplicant service must be enabled with the required trusted applications.
+
+### Where to Add Configuration
+
+Add the tee-supplicant configuration in the **`Dogebox-WG/os`** repository at:
+
+**File:** `nix/dbx/dkm.nix`
+
+This is the NixOS module that configures the DKM service for Dogebox OS.
+
+### Configuration to Add
+
+```nix
+{ config, pkgs, lib, ... }:
+{
+  # ... existing DKM module configuration ...
+  
+  # Enable tee-supplicant service for OP-TEE with required TAs
+  services.tee-supplicant = {
+    enable = true;
+    trustedApplications = [
+      # OP-TEE OS standard TAs for RK3588 platform
+      "${pkgs.optee-os-rockchip-rk3588.devkit}/ta/023f8f1a-292a-432b-8fc4-de8471358067.ta"
+      "${pkgs.optee-os-rockchip-rk3588.devkit}/ta/80a4c275-0a47-4905-8285-1486a9771a08.ta"
+      "${pkgs.optee-os-rockchip-rk3588.devkit}/ta/f04a0fe7-1f5d-4b9b-abf7-619b85b4ce8c.ta"
+      "${pkgs.optee-os-rockchip-rk3588.devkit}/ta/fd02c9da-306c-48c7-a49c-bbd827ae86ee.ta"
+      
+      # libdogecoin OP-TEE Trusted Application (for DKM)
+      "${libdogecoin."libdogecoin-optee-ta"}/ta/62d95dc0-7fc2-4cb3-a7f3-c13ae4e633c4.ta"
+    ];
+  };
+}
+```
+
+### Trusted Applications
+
+- **Standard OP-TEE TAs**: Platform-specific TAs from optee-os-rockchip-rk3588
+- **libdogecoin TA** (UUID: 62d95dc0-7fc2-4cb3-a7f3-c13ae4e633c4): The secure enclave for DKM operations
+
+### Platform Support
+
+This configuration is specific to:
+- **Hardware**: RK3588-based devices (e.g., NanoPC-T6)
+- **OS**: Dogebox OS (NixOS-based)
+- **OP-TEE**: ARM TrustZone implementation for RK3588
+
+For other platforms (x86_64 with Intel SGX, etc.), adjust the trusted applications accordingly.
+
 ## References
 
 - Example usage: https://github.com/edtubbs/pups/blob/spv-enclave/spv_enclave/pup.nix
 - libdogecoin enclave docs: https://github.com/dogecoinfoundation/libdogecoin/blob/0.1.5-dev/doc/enclaves.md
 - libdogecoin package: https://github.com/Dogebox-WG/dogebox-nur-packages/blob/main/pkgs/libdogecoin/default.nix
+- Dogebox OS repository: https://github.com/Dogebox-WG/os
