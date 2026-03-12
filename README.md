@@ -96,10 +96,11 @@ in both cases, ensuring compatibility across all deployments.
 
 ## Deployment
 
-For production deployment on Dogebox OS with OP-TEE support, the tee-supplicant 
-service must be configured. Add the configuration to the `Dogebox-WG/os` 
-repository in the `nix/dbx/dkm.nix` module.
+DKM provides OP-TEE enclave integration code that pups can use. Individual pups 
+that need OP-TEE support configure the tee-supplicant service in their own 
+`pup.nix` files, not in the DKM service module. This prevents conflicts and 
+follows Dogebox's containerized architecture.
 
-See [docs/OPTEE-INTEGRATION.md](docs/OPTEE-INTEGRATION.md) for the complete 
-NixOS module configuration, including all required trusted applications.
+See [docs/OPTEE-INTEGRATION.md](docs/OPTEE-INTEGRATION.md) for details on how 
+pups configure tee-supplicant and the complete list of required trusted applications.
 

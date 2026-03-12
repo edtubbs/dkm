@@ -279,24 +279,24 @@ This ensures DKM works whether OP-TEE is present or not.
 
 ## NixOS Deployment Configuration
 
-For DKM to use OP-TEE in production on Dogebox OS, the tee-supplicant service must be enabled with the required trusted applications.
+### Architecture
 
-### Where to Add Configuration
+DKM provides the OP-TEE enclave integration code, but **does not configure the tee-supplicant service itself**. Instead:
 
-Add the tee-supplicant configuration in the **`Dogebox-WG/os`** repository at:
+- **Individual pups** that need OP-TEE configure tee-supplicant in their `pup.nix` files
+- **DKM** provides the Go wrapper code that pups can use to interact with the enclave
+- This prevents conflicts and allows each pup to specify its own TA requirements
 
-**File:** `nix/dbx/dkm.nix`
+### Example: Pup Configuration
 
-This is the NixOS module that configures the DKM service for Dogebox OS.
-
-### Configuration to Add
+Pups that use DKM's OP-TEE integration configure tee-supplicant like this (from `spv-enclave/pup.nix`):
 
 ```nix
-{ config, pkgs, lib, ... }:
 {
-  # ... existing DKM module configuration ...
-  
-  # Enable tee-supplicant service for OP-TEE with required TAs
+  pupEnclave = true;
+
+  imports = [ (pkgs.nixosModules.tee-supplicant) ];
+
   services.tee-supplicant = {
     enable = true;
     trustedApplications = [
@@ -306,12 +306,25 @@ This is the NixOS module that configures the DKM service for Dogebox OS.
       "${pkgs.optee-os-rockchip-rk3588.devkit}/ta/f04a0fe7-1f5d-4b9b-abf7-619b85b4ce8c.ta"
       "${pkgs.optee-os-rockchip-rk3588.devkit}/ta/fd02c9da-306c-48c7-a49c-bbd827ae86ee.ta"
       
-      # libdogecoin OP-TEE Trusted Application (for DKM)
+      # libdogecoin OP-TEE Trusted Application (for DKM operations)
       "${libdogecoin."libdogecoin-optee-ta"}/ta/62d95dc0-7fc2-4cb3-a7f3-c13ae4e633c4.ta"
     ];
   };
 }
 ```
+
+### Where to Configure
+
+**Do NOT add to:** `Dogebox-WG/os` repository's `nix/dbx/dkm.nix`
+
+**DO add to:** Each pup's `pup.nix` file that needs OP-TEE support
+
+### Why Per-Pup Configuration
+
+1. **No conflicts**: Each pup manages its own tee-supplicant instance
+2. **Flexibility**: Pups can specify different TAs as needed
+3. **Isolation**: Follows containerized architecture of Dogebox
+4. **Standard pattern**: Already used in spv-enclave and other pups
 
 ### Trusted Applications
 
