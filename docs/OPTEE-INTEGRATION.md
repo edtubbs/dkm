@@ -148,16 +148,32 @@ DKM's delegate key operations can leverage the enclave:
 
 The `CreateKey()` method attempts to use the enclave:
 
-1. Try to initialize `OpteeTool`
-   - If fails → Use local mnemonic generation
-2. Check if mnemonic already exists in enclave (using password)
+1. **Check if enclave is disabled**: If `DKM_SKIP_OPTEE` environment variable is set, skip enclave entirely
+2. **Try to initialize `OpteeTool`**:
+   - If fails → Silently use local mnemonic generation (expected during installation)
+3. **Check if mnemonic already exists in enclave** (using password)
    - If yes → Return ErrKeyExists
-3. Generate mnemonic in enclave with password
+4. **Generate mnemonic in enclave** with password
    - If fails → Use local mnemonic generation
-4. Derive master key from mnemonic
-5. Encrypt and store master key locally
+5. **Derive master key** from mnemonic
+6. **Encrypt and store** master key locally
 
 This ensures backward compatibility and graceful fallback.
+
+**Silent Fallback**: During installation, before `optee_libdogecoin` is installed, DKM silently falls back to local generation. Error logging only occurs when `DKM_DEBUG` is set.
+
+### Environment Variables
+
+- **`DKM_SKIP_OPTEE`**: When set, completely bypasses OP-TEE enclave and uses local mnemonic generation. Useful during installation/setup phase.
+- **`DKM_DEBUG`**: When set, enables debug logging including enclave availability messages.
+
+### Error Handling During Installation
+
+To avoid confusing error messages during the installation/setup phase:
+
+1. **Environment Variable Control**: Set `DKM_SKIP_OPTEE=1` during installation to skip enclave checks
+2. **Silent Fallback**: Without debug mode, enclave unavailability doesn't produce log messages
+3. **After Setup**: Remove `DKM_SKIP_OPTEE` and restart DKM to enable enclave usage
 
 ## Build Configuration
 
@@ -293,8 +309,21 @@ Add to **`Dogebox-WG/os`** repository in file **`nix/dbx/dkm.nix`**:
 
 ```nix
 { config, pkgs, lib, ... }:
+let
+  libdogecoin = pkgs.callPackage (pkgs.fetchurl {
+    url = "https://raw.githubusercontent.com/Dogebox-WG/dogebox-nur-packages/refs/heads/main/pkgs/libdogecoin/default.nix";
+    sha256 = "...";
+  }) {};
+in
 {
   # ... existing DKM service configuration ...
+  
+  # CRITICAL: Install libdogecoin TA on HOST system
+  # DKM is a system service and needs the TA available on the host
+  environment.systemPackages = [
+    libdogecoin."libdogecoin-optee-ta"
+    libdogecoin."libdogecoin-optee-host"
+  ];
   
   # Enable tee-supplicant for DKM's OP-TEE integration
   services.tee-supplicant = {
@@ -310,8 +339,16 @@ Add to **`Dogebox-WG/os`** repository in file **`nix/dbx/dkm.nix`**:
       "${libdogecoin."libdogecoin-optee-ta"}/ta/62d95dc0-7fc2-4cb3-a7f3-c13ae4e633c4.ta"
     ];
   };
+  
+  # Ensure DKM service starts after tee-supplicant
+  systemd.services.dkm = {
+    after = [ "tee-supplicant.service" ];
+    requires = [ "tee-supplicant.service" ];
+  };
 }
 ```
+
+**IMPORTANT**: The libdogecoin TA **must** be installed on the HOST system, not just in pup containers. DKM runs as a system service and requires host-level access to the TA.
 
 **Why:** DKM runs as a system service and directly calls `optee_libdogecoin`, which requires tee-supplicant at the system level.
 

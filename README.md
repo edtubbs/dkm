@@ -90,9 +90,15 @@ DKM gracefully handles the absence of OP-TEE:
 1. **Key Creation**: Attempts to use OP-TEE enclave first, falls back to local generation if unavailable
 2. **Compatibility**: Works identically whether OP-TEE is present or not
 3. **No Breaking Changes**: Existing DKM deployments continue to work unchanged
+4. **Silent Fallback**: During installation, enclave unavailability is expected and doesn't produce error logs
 
 The master key derived from the mnemonic is still encrypted and stored locally
 in both cases, ensuring compatibility across all deployments.
+
+### Environment Variables
+
+- **`DKM_SKIP_OPTEE`**: Set to any value to disable OP-TEE enclave and always use local mnemonic generation. Useful during installation/setup phase.
+- **`DKM_DEBUG`**: Set to any value to enable debug logging, including enclave availability messages.
 
 ## Deployment
 

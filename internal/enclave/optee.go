@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -15,7 +17,19 @@ var (
 	ErrEnclaveRead          = errors.New("failed to read from enclave")
 	ErrMnemonicNotFound     = errors.New("mnemonic not found in enclave output")
 	ErrInvalidEnclaveOutput = errors.New("invalid enclave output format")
+	ErrTeeSupplicantDown    = errors.New("tee-supplicant service not running on host system")
+	ErrTeeCommunication     = errors.New("TEE communication error - check tee-supplicant and /dev/tee* devices")
 )
+
+// ShouldSkipEnclave checks if enclave should be skipped
+// Returns true during installation or if explicitly disabled via environment
+func ShouldSkipEnclave() bool {
+	// Check if explicitly disabled via environment variable
+	if os.Getenv("DKM_SKIP_OPTEE") != "" {
+		return true
+	}
+	return false
+}
 
 // OpteeTool represents the optee_libdogecoin CLI tool
 type OpteeTool struct {
@@ -35,7 +49,78 @@ func NewOpteeTool(binPath string) (*OpteeTool, error) {
 		return nil, fmt.Errorf("%w: %v", ErrEnclaveNotAvailable, err)
 	}
 	
+	// Perform a basic diagnostic check
+	if os.Getenv("DKM_DEBUG") != "" {
+		performDiagnostics()
+	}
+	
 	return &OpteeTool{binPath: binPath}, nil
+}
+
+// performDiagnostics checks OP-TEE prerequisites and logs issues
+func performDiagnostics() {
+	log.Printf("=== OP-TEE Diagnostics ===")
+	
+	// Check if /dev/tee0 exists
+	if _, err := os.Stat("/dev/tee0"); err != nil {
+		log.Printf("✗ /dev/tee0 not found - OP-TEE device not available")
+		log.Printf("  This usually means OP-TEE OS is not running or not properly configured")
+	} else {
+		log.Printf("✓ /dev/tee0 found - OP-TEE device available")
+	}
+	
+	// Check if /dev/teepriv0 exists
+	if _, err := os.Stat("/dev/teepriv0"); err != nil {
+		log.Printf("  /dev/teepriv0 not found (optional)")
+	} else {
+		log.Printf("✓ /dev/teepriv0 found")
+	}
+	
+	// Check if tee-supplicant process is running
+	cmd := exec.Command("pgrep", "-x", "tee-supplicant")
+	if err := cmd.Run(); err != nil {
+		log.Printf("✗ tee-supplicant process not running")
+		log.Printf("  Run: systemctl status tee-supplicant.service")
+	} else {
+		log.Printf("✓ tee-supplicant process is running")
+	}
+	
+	// Check if TA directory exists
+	taDir := "/lib/optee_armtz"
+	if info, err := os.Stat(taDir); err != nil {
+		log.Printf("✗ Trusted Application directory %s not found", taDir)
+		log.Printf("  TAs must be installed on the HOST system in this directory")
+	} else if !info.IsDir() {
+		log.Printf("✗ %s is not a directory", taDir)
+	} else {
+		log.Printf("✓ TA directory %s exists", taDir)
+		
+		// Check specifically for libdogecoin TA
+		libdogecoinTA := "62d95dc0-7fc2-4cb3-a7f3-c13ae4e633c4.ta"
+		libdogecoinPath := taDir + "/" + libdogecoinTA
+		if _, err := os.Stat(libdogecoinPath); err != nil {
+			log.Printf("✗ libdogecoin TA NOT FOUND: %s", libdogecoinPath)
+			log.Printf("  This is likely the problem! The libdogecoin TA must be installed on the HOST.")
+			log.Printf("  It should come from: libdogecoin.\"libdogecoin-optee-ta\" package")
+		} else {
+			log.Printf("✓ libdogecoin TA found: %s", libdogecoinTA)
+		}
+		
+		// List all TAs
+		entries, err := os.ReadDir(taDir)
+		if err == nil && len(entries) > 0 {
+			log.Printf("  Found %d total Trusted Applications:", len(entries))
+			for _, entry := range entries {
+				if strings.HasSuffix(entry.Name(), ".ta") {
+					log.Printf("    - %s", entry.Name())
+				}
+			}
+		} else {
+			log.Printf("✗ No Trusted Applications found in %s", taDir)
+		}
+	}
+	
+	log.Printf("=========================")
 }
 
 // GenerateMnemonic generates a new mnemonic in the enclave
@@ -51,7 +136,35 @@ func (t *OpteeTool) GenerateMnemonic(password string) ([]string, error) {
 	
 	err := cmd.Run()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v, stderr: %s", ErrEnclaveGenerate, err, stderr.String())
+		stderrStr := stderr.String()
+		
+		// Check for TEEC_ERROR_COMMUNICATION (0xffff0008)
+		if strings.Contains(stderrStr, "0xffff0008") || 
+		   strings.Contains(stderrStr, "TEEC_InitializeContext failed") {
+			return nil, fmt.Errorf("%w (code 0xffff0008): %s\n"+
+				"DIAGNOSIS:\n"+
+				"  1. Most likely: libdogecoin TA not installed on HOST\n"+
+				"     - Check: ls -la /lib/optee_armtz/62d95dc0-7fc2-4cb3-a7f3-c13ae4e633c4.ta\n"+
+				"     - Install: libdogecoin.\"libdogecoin-optee-ta\" package on HOST system\n"+
+				"  2. Check tee-supplicant: systemctl status tee-supplicant\n"+
+				"  3. Check /dev/tee0: ls -la /dev/tee*\n"+
+				"  4. Verify OP-TEE OS is loaded and running\n"+
+				"  NOTE: DKM runs on HOST - TAs must be installed on HOST, not in containers\n"+
+				"  Enable DKM_DEBUG=1 to run diagnostics on next attempt",
+				ErrTeeCommunication, stderrStr)
+		}
+		
+		// Check if the error is due to tee-supplicant not running
+		if strings.Contains(stderrStr, "Failed to open") || 
+		   strings.Contains(stderrStr, "/dev/tee") ||
+		   strings.Contains(stderrStr, "tee-supplicant") ||
+		   strings.Contains(stderrStr, "TEEC_") ||
+		   strings.Contains(stderrStr, "Cannot connect") {
+			return nil, fmt.Errorf("%w: %v, stderr: %s\nHINT: Ensure tee-supplicant.service is running on the HOST system (not just in containers)", 
+				ErrTeeSupplicantDown, err, stderrStr)
+		}
+		
+		return nil, fmt.Errorf("%w: %v, stderr: %s", ErrEnclaveGenerate, err, stderrStr)
 	}
 	
 	// Parse the output to extract the mnemonic
