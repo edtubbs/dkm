@@ -31,6 +31,22 @@ This provides an additional layer of security by isolating the most sensitive
 cryptographic material (the mnemonic) from the host system, even if the host
 is compromised.
 
+### ⚠️ CRITICAL LIMITATION: Shared OP-TEE Storage
+
+**WARNING**: OP-TEE secure storage is **NOT isolated** between host and containers.
+
+- The libdogecoin TA stores mnemonics at a **single location** in OP-TEE secure storage
+- Both DKM (host) and pups (containers) access the **same OP-TEE kernel/TEE**
+- If both DKM and a pup use `optee_libdogecoin`, **they will overwrite each other's mnemonics**
+- Container isolation does NOT apply to OP-TEE storage (it's at hardware/kernel level)
+
+**Recommended Configuration**:
+- **Use OP-TEE storage for DKM only** (system-level service)
+- **Pups should use local storage** or derive keys from DKM via delegation
+- Only ONE component should generate/store mnemonics in OP-TEE
+
+See [docs/OPTEE-INTEGRATION.md](docs/OPTEE-INTEGRATION.md#storage-isolation-limitation) for details.
+
 ### How It Works
 
 DKM calls the `optee_libdogecoin` command-line tool to interact with the OP-TEE 

@@ -1,5 +1,28 @@
 # Quick Fix Guide: OP-TEE Integration
 
+## ⚠️ CRITICAL WARNING: Storage Isolation
+
+**Before deploying OP-TEE with DKM, read this:**
+
+### Problem: Shared Storage Overwrites
+
+OP-TEE secure storage is **NOT isolated** between host and containers:
+- DKM (host) and pups (containers) access the **same OP-TEE storage location**
+- If both generate mnemonics, **they will overwrite each other**
+- Container isolation does NOT apply to OP-TEE (hardware/kernel level)
+
+### Required Configuration
+
+**✅ CORRECT: Only ONE component uses OP-TEE mnemonic storage**
+- DKM (host) → Uses OP-TEE for mnemonic
+- Pups → Use local storage OR derive from DKM
+
+**❌ INCORRECT: Both use OP-TEE**
+- DKM generates mnemonic in OP-TEE
+- Pup also generates mnemonic in OP-TEE → **OVERWRITES DKM's mnemonic!**
+
+---
+
 ## Problem: TEEC_InitializeContext failed with code 0xffff0008
 
 This error means the libdogecoin Trusted Application (TA) is not found on the HOST system.
@@ -125,6 +148,77 @@ Should create mnemonic without errors.
 - This is the CLI, not the TA
 - Solution: Install libdogecoin-optee-ta too
 
+❌ **Both DKM and pups using OP-TEE mnemonic storage**
+- DKM generates mnemonic in OP-TEE
+- Pup also generates mnemonic in OP-TEE
+- Result: Pup overwrites DKM's mnemonic!
+- Solution: Only DKM should use OP-TEE mnemonic storage
+
+## Configuring Pups to NOT Use OP-TEE Mnemonic Storage
+
+If you have pups (like spv-enclave) that currently use `optee_libdogecoin` for mnemonic generation, you need to reconfigure them to avoid storage conflicts with DKM.
+
+### Option 1: Use Local Storage in Pups
+
+Configure pups to use local mnemonic storage instead of OP-TEE:
+
+```python
+# In pup code, use local BIP39 library instead of optee_libdogecoin
+from mnemonic import Mnemonic
+
+# Generate locally (NOT in OP-TEE)
+mnemo = Mnemonic("english")
+mnemonic_phrase = mnemo.generate(strength=256)
+
+# Store in encrypted local file
+# (use pup's own encryption, not OP-TEE)
+```
+
+### Option 2: Derive Keys from DKM via Delegation
+
+Configure pups to request delegated keys from DKM instead of managing their own mnemonics:
+
+```python
+# In pup code, request delegated key from DKM
+import requests
+
+# Call DKM API to get a delegated key for this pup
+response = requests.post("http://dkm:8089/delegate", json={
+    "pup_name": "spv-enclave",
+    "purpose": "blockchain_signing"
+})
+
+# Use the delegated key (not a full mnemonic)
+delegated_key = response.json()["key"]
+```
+
+### Option 3: Remove OP-TEE from Pup Configuration
+
+If a pup's `pup.nix` currently includes tee-supplicant configuration, consider whether it actually needs OP-TEE:
+
+```nix
+# pup.nix - BEFORE (causes conflicts)
+{
+  pupEnclave = true;
+  imports = [ (pkgs.nixosModules.tee-supplicant) ];
+  services.tee-supplicant = {
+    enable = true;
+    trustedApplications = [ /* libdogecoin TA */ ];
+  };
+}
+
+# pup.nix - AFTER (no OP-TEE mnemonic storage)
+{
+  # Remove OP-TEE if not actually needed
+  # OR keep OP-TEE but don't use it for mnemonic generation
+  pupEnclave = false;
+  
+  # Use local storage or DKM delegation instead
+}
+```
+
+**Note**: A pup can still use OP-TEE for OTHER purposes (like signing operations), but should not use `optee_libdogecoin -c generate_mnemonic`.
+
 ## During Installation
 
 To avoid confusing errors during OS installation:
@@ -139,6 +233,16 @@ systemd.services.dkm = {
 ```
 
 After installation completes, restart DKM to enable enclave.
+
+## Summary: Deployment Checklist
+
+- [ ] **DKM (host)**: Install libdogecoin-optee-ta on HOST
+- [ ] **DKM (host)**: Install libdogecoin-optee-host on HOST
+- [ ] **DKM (host)**: Enable tee-supplicant on HOST
+- [ ] **DKM (host)**: DKM uses OP-TEE for mnemonic storage
+- [ ] **Pups**: Do NOT use OP-TEE for mnemonic generation
+- [ ] **Pups**: Use local storage OR request delegated keys from DKM
+- [ ] **Verify**: Only ONE component generates mnemonics in OP-TEE
 
 ## References
 

@@ -2,6 +2,70 @@
 
 This document describes how DKM integrates with the libdogecoin OP-TEE Trusted Application.
 
+## ⚠️ CRITICAL LIMITATION: Storage Isolation
+
+**WARNING: OP-TEE secure storage is NOT isolated between host and containers!**
+
+### The Problem
+
+When DKM (host) generates a mnemonic using `optee_libdogecoin`, and then a pup (container) also uses `optee_libdogecoin`, **the pup's usage will overwrite the host's stored mnemonic**.
+
+**Why this happens:**
+- OP-TEE secure storage is at the **kernel/TEE level**, not container-isolated
+- The libdogecoin TA (UUID: `62d95dc0-7fc2-4cb3-a7f3-c13ae4e633c4`) stores mnemonics at a **single location**
+- Both host (DKM) and containers (pups) access the **same OP-TEE kernel**
+- systemd-nspawn container isolation does **NOT extend to OP-TEE** (it's in hardware TrustZone)
+- There is **NO namespace or object ID parameter** to isolate storage
+
+### Recommended Solution
+
+**Use OP-TEE mnemonic storage for ONLY ONE component:**
+
+| Component | Recommended Configuration |
+|-----------|---------------------------|
+| **DKM (host)** | ✅ Use OP-TEE enclave for mnemonic storage |
+| **Pups (containers)** | ❌ Do NOT use OP-TEE mnemonic storage<br>✅ Use local storage OR<br>✅ Derive keys from DKM via delegation |
+
+### Why Container Isolation Doesn't Help
+
+```
+┌─────────────────────────────────────────────┐
+│          Host (DKM)                         │
+│  optee_libdogecoin → tee-supplicant         │
+│                          ↓                  │
+│  ┌──────────────────────▼────────────────┐ │
+│  │    systemd-nspawn Container (pup)     │ │
+│  │  optee_libdogecoin → tee-supplicant   │ │
+│  │                          ↓             │ │
+│  └──────────────────────┼─────────────────┘ │
+│                         ↓                   │
+│     ┌───────────────────▼─────────────┐    │
+│     │   OP-TEE Linux Kernel Driver    │    │
+│     └───────────────────┬─────────────┘    │
+└─────────────────────────┼───────────────────┘
+                          ↓
+          ┌───────────────▼─────────────┐
+          │   OP-TEE OS (TrustZone)     │
+          │   Secure Storage            │
+          │   SINGLE SHARED LOCATION    │
+          └─────────────────────────────┘
+```
+
+Both host and container access **the same secure storage location** because:
+- OP-TEE runs in ARM TrustZone (hardware isolation from normal world)
+- All communication goes through the same kernel driver
+- The TA has only one storage namespace
+- No isolation parameters exist in `optee_libdogecoin` CLI
+
+### Alternative: Upstream Fix Required
+
+To truly support multiple isolated uses, libdogecoin would need:
+- Storage namespace parameter (e.g., `-n <namespace>`)
+- Multiple TA instances per user/context
+- UID-based storage separation in the TA
+
+These changes would require modifications to libdogecoin's OP-TEE TA itself.
+
 ## Overview
 
 DKM integrates with OP-TEE by calling the `optee_libdogecoin` command-line tool, which is part of the `libdogecoin-optee-host` package. This tool provides a simple interface to the libdogecoin Trusted Application (TA) running in the secure world.

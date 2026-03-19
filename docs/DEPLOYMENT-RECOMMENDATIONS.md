@@ -2,6 +2,38 @@
 
 This document provides recommendations for deploying DKM with OP-TEE support in Dogebox OS.
 
+## ⚠️ CRITICAL: Storage Isolation Limitation
+
+**WARNING**: Before deploying, understand this critical limitation:
+
+### OP-TEE Storage is NOT Isolated Between Host and Containers
+
+- The libdogecoin OP-TEE TA stores mnemonics at a **single shared location**
+- Both DKM (host) and pups (containers) access the **same OP-TEE storage**
+- **If both use `optee_libdogecoin`, they will overwrite each other's mnemonics**
+- Container isolation (systemd-nspawn) does NOT extend to OP-TEE (hardware/kernel level)
+
+### Deployment Rule
+
+**Only ONE component should use OP-TEE mnemonic storage:**
+
+| Component | Configuration |
+|-----------|---------------|
+| **DKM (host)** | ✅ Use OP-TEE enclave |
+| **Pups (e.g., spv-enclave)** | ❌ Do NOT use OP-TEE mnemonic storage<br>✅ Use local storage OR derive from DKM |
+
+**Example Problem Scenario:**
+1. DKM generates mnemonic in OP-TEE → stored in secure storage
+2. spv-enclave pup generates its own mnemonic in OP-TEE → **OVERWRITES DKM's mnemonic**
+3. DKM can no longer access its original mnemonic → **data loss!**
+
+**Correct Approach:**
+- DKM uses OP-TEE for mnemonic storage
+- Pups derive keys from DKM via delegation OR use local storage
+- Never have multiple components generate mnemonics in OP-TEE
+
+See [docs/OPTEE-INTEGRATION.md](OPTEE-INTEGRATION.md#storage-isolation-limitation) for technical details.
+
 ## Issue: Installation Timing
 
 ### Problem
