@@ -17,3 +17,120 @@ ChaCha20 cypher and Poly1305 Authenticated Encryption (AE) scheme.
 Keys in DKM are only in memory while they are actively being used for
 Authentication or key derivation.
 
+## OP-TEE Secure Enclave Integration
+
+DKM integrates with the **libdogecoin OP-TEE Trusted Application** to store 
+the seedphrase (mnemonic) in a secure enclave. When the `optee_libdogecoin` 
+CLI tool is available, DKM will:
+
+- Generate the mnemonic within the OP-TEE secure enclave
+- Store it in encrypted secure storage within the enclave
+- Never expose the mnemonic outside the secure world (except during initial generation for backup)
+
+This provides an additional layer of security by isolating the most sensitive
+cryptographic material (the mnemonic) from the host system, even if the host
+is compromised.
+
+### ⚠️ CRITICAL LIMITATION: Shared OP-TEE Storage
+
+**WARNING**: OP-TEE secure storage is **NOT isolated** between host and containers.
+
+- The libdogecoin TA stores mnemonics at a **single location** in OP-TEE secure storage
+- Both DKM (host) and pups (containers) access the **same OP-TEE kernel/TEE**
+- If both DKM and a pup use `optee_libdogecoin`, **they will overwrite each other's mnemonics**
+- Container isolation does NOT apply to OP-TEE storage (it's at hardware/kernel level)
+
+**Recommended Configuration**:
+- **Use OP-TEE storage for DKM only** (system-level service)
+- **Pups should use local storage** or derive keys from DKM via delegation
+- Only ONE component should generate/store mnemonics in OP-TEE
+
+See [docs/OPTEE-INTEGRATION.md](docs/OPTEE-INTEGRATION.md#storage-isolation-limitation) for details.
+
+### How It Works
+
+DKM calls the `optee_libdogecoin` command-line tool to interact with the OP-TEE 
+Trusted Application. The tool handles all communication with the secure enclave:
+
+```bash
+# Generate mnemonic in enclave (called by DKM with user password)
+optee_libdogecoin -c generate_mnemonic -p <password> -f "delegate"
+
+# Generate extended public key from master key path (for verification)
+optee_libdogecoin -c generate_extended_public_key -h m -p <password>
+
+# Generate address from enclave-stored mnemonic
+optee_libdogecoin -c generate_address -o 0 -l 0 -i 0 -p <password>
+```
+
+The `-p` flag passes the user's password to protect the mnemonic. 
+The `-h` flag specifies a custom BIP32 key path, allowing DKM to use its 
+specific derivation paths:
+- `m` for master key verification
+- `m/1000'/2'/N'` for pup/delegate namespace
+
+The `-z` flag can optionally enable YubiKey authentication (not used by DKM).
+
+### Building with OP-TEE Support
+
+To build DKM with OP-TEE support, use the `dkm-optee` package:
+
+```bash
+nix build .#dkm-optee
+```
+
+This will ensure `optee_libdogecoin` is available in the PATH when running DKM.
+
+For development with OP-TEE:
+
+```bash
+nix develop .#optee
+```
+
+### Requirements
+
+When using OP-TEE support, you need:
+
+- `optee_libdogecoin` CLI tool (from libdogecoin-optee-host package)
+- OP-TEE OS running on the system
+- libdogecoin TA installed (UUID: 62d95dc0-7fc2-4cb3-a7f3-c13ae4e633c4)
+- tee-supplicant service running
+
+Without these components, DKM will automatically fall back to local mnemonic 
+generation without user intervention.
+
+### Fallback Behavior
+
+DKM gracefully handles the absence of OP-TEE:
+
+1. **Key Creation**: Attempts to use OP-TEE enclave first, falls back to local generation if unavailable
+2. **Compatibility**: Works identically whether OP-TEE is present or not
+3. **No Breaking Changes**: Existing DKM deployments continue to work unchanged
+4. **Silent Fallback**: During installation, enclave unavailability is expected and doesn't produce error logs
+
+The master key derived from the mnemonic is still encrypted and stored locally
+in both cases, ensuring compatibility across all deployments.
+
+### Environment Variables
+
+- **`DKM_SKIP_OPTEE`**: Set to any value to disable OP-TEE enclave and always use local mnemonic generation. Useful during installation/setup phase.
+- **`DKM_DEBUG`**: Set to any value to enable debug logging, including enclave availability messages.
+
+## Deployment
+
+### System-Level Configuration (Required for DKM)
+
+DKM is a system service that needs tee-supplicant running at the system level. 
+Add the tee-supplicant configuration in `Dogebox-WG/os` repository at 
+`nix/dbx/dkm.nix`.
+
+### Pup-Level Configuration (For Containerized Apps)
+
+Pups that use OP-TEE also configure tee-supplicant in their own `pup.nix` files 
+(e.g., spv-enclave). Both system and pup levels can run tee-supplicant without 
+conflict because pups are isolated in systemd-nspawn containers.
+
+See [docs/OPTEE-INTEGRATION.md](docs/OPTEE-INTEGRATION.md) for complete 
+configuration details, including all required trusted applications for both 
+system and pup deployments.
+

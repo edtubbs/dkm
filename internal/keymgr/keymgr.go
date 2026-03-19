@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"log"
+	"os"
 	"time"
 
 	"code.dogecoin.org/dkm/internal"
+	"code.dogecoin.org/dkm/internal/enclave"
 	"github.com/dogeorg/doge"
 	"github.com/dogeorg/doge/bip39"
 	"golang.org/x/crypto/argon2"
@@ -60,18 +62,113 @@ func New(store internal.StoreCtx) internal.KeyMgr {
 }
 
 func (km *keyMgr) CreateKey(pass string) (mnemonic []string, err error) {
-	mnemonic, key, pub, err := km.generateMnemonic()
+	// Skip enclave if explicitly disabled (e.g., during installation)
+	if enclave.ShouldSkipEnclave() {
+		// Silently use local generation when enclave is disabled
+		mnemonic, key, pub, err := km.generateMnemonic()
+		if err != nil {
+			return nil, err
+		}
+		err = km.encryptAndSetKey(MainKey, key, pub, pass, false)
+		memZero(key)
+		if err != nil {
+			if internal.IsAlreadyExistsError(err) {
+				return nil, ErrKeyExists
+			}
+			return nil, err
+		}
+		return mnemonic, nil
+	}
+
+	// Try to use OP-TEE enclave for mnemonic generation if available
+	opteeTool, err := enclave.NewOpteeTool("")
+	if err != nil {
+		// Enclave not available, fall back to local generation
+		// This is expected during installation before optee_libdogecoin is installed
+		// Log at debug level to avoid confusing users during normal installation
+		if os.Getenv("DKM_DEBUG") != "" {
+			log.Printf("OP-TEE enclave not available, using local mnemonic generation: %v", err)
+		}
+		mnemonic, key, pub, err := km.generateMnemonic()
+		if err != nil {
+			return nil, err
+		}
+		err = km.encryptAndSetKey(MainKey, key, pub, pass, false)
+		memZero(key)
+		if err != nil {
+			if internal.IsAlreadyExistsError(err) {
+				return nil, ErrKeyExists
+			}
+			return nil, err
+		}
+		return mnemonic, nil
+	}
+
+	// Check if a mnemonic already exists in the enclave
+	if opteeTool.HasMnemonic(pass) {
+		return nil, ErrKeyExists
+	}
+
+	// Generate mnemonic in the secure enclave with password
+	mnemonic, err = opteeTool.GenerateMnemonic(pass)
+	if err != nil {
+		// Check if it's a TEE communication error (0xffff0008)
+		if errors.Is(err, enclave.ErrTeeCommunication) {
+			// This is a serious configuration issue - log it clearly
+			log.Printf("ERROR: TEE Communication Failed")
+			log.Printf("%v", err)
+		} else if errors.Is(err, enclave.ErrTeeSupplicantDown) {
+			// tee-supplicant issue - log it clearly
+			log.Printf("ERROR: %v", err)
+			log.Printf("DKM is a system service and requires tee-supplicant running on the HOST system.")
+			log.Printf("Add tee-supplicant configuration to nix/dbx/dkm.nix in Dogebox-WG/os repository.")
+		} else if os.Getenv("DKM_DEBUG") != "" {
+			// Other enclave failures - debug log only
+			log.Printf("Failed to generate mnemonic in enclave, using local generation: %v", err)
+		}
+		
+		// Fall back to local generation
+		mnemonic, key, pub, err := km.generateMnemonic()
+		if err != nil {
+			return nil, err
+		}
+		err = km.encryptAndSetKey(MainKey, key, pub, pass, false)
+		memZero(key)
+		if err != nil {
+			if internal.IsAlreadyExistsError(err) {
+				return nil, ErrKeyExists
+			}
+			return nil, err
+		}
+		return mnemonic, nil
+	}
+
+	// Derive the master key from the mnemonic generated in the enclave
+	seed, err := bip39.SeedFromMnemonic(mnemonic, "", bip39.EnglishWordList)
 	if err != nil {
 		return nil, err
 	}
-	err = km.encryptAndSetKey(MainKey, key, pub, pass, false)
-	memZero(key)
+	defer memZero(seed)
+
+	master, err := doge.Bip32MasterFromSeed(seed, &doge.DogeMainNetChain)
+	if err != nil {
+		return nil, err
+	}
+	defer master.Clear()
+
+	pub := master.GetECPubKey()
+	key := []byte(master.EncodeWIF())
+	defer memZero(key)
+
+	err = km.encryptAndSetKey(MainKey, key, pub[:], pass, false)
 	if err != nil {
 		if internal.IsAlreadyExistsError(err) {
 			return nil, ErrKeyExists
 		}
 		return nil, err
 	}
+
+	log.Printf("Mnemonic successfully generated and stored in OP-TEE secure enclave with password")
 	return mnemonic, nil
 }
 
